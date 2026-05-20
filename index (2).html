@@ -1,0 +1,438 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Land Feature Detection Map - Boundary Analysis</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" />
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" />
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #f0f0f0; }
+        
+        #map { height: 100vh; width: 100%; }
+        
+        .header {
+            position: absolute; top: 10px; left: 10px; z-index: 1000;
+            background: white; padding: 15px; border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.15); max-width: 350px;
+        }
+        
+        .header h1 { font-size: 18px; margin-bottom: 5px; color: #333; }
+        .header p { font-size: 12px; color: #666; margin-bottom: 10px; }
+        
+        .control-panel {
+            position: absolute; top: 180px; left: 10px; z-index: 1000;
+            background: white; padding: 15px; border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.15); width: 320px;
+            max-height: 500px; overflow-y: auto;
+        }
+        
+        .legend {
+            position: absolute; bottom: 20px; right: 20px; z-index: 1000;
+            background: white; padding: 15px; border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.15); max-width: 280px;
+        }
+        
+        .legend h3 { font-size: 14px; margin-bottom: 10px; font-weight: 600; }
+        .legend-item { display: flex; align-items: center; margin: 8px 0; font-size: 12px; }
+        .legend-color { width: 16px; height: 16px; margin-right: 8px; border-radius: 2px; border: 1px solid #999; }
+        
+        .feature-toggle { display: flex; align-items: center; margin: 10px 0; }
+        .feature-toggle input { margin-right: 8px; cursor: pointer; }
+        .feature-toggle label { cursor: pointer; font-size: 13px; flex: 1; }
+        
+        .btn { 
+            padding: 8px 12px; background: #4CAF50; color: white; border: none; 
+            border-radius: 4px; cursor: pointer; font-size: 12px; width: 100%;
+            margin-top: 10px; transition: background 0.3s;
+        }
+        
+        .btn:hover { background: #45a049; }
+        .btn-danger { background: #f44336; }
+        .btn-danger:hover { background: #da190b; }
+        
+        .stats {
+            background: #f9f9f9; padding: 10px; border-radius: 4px;
+            margin-top: 10px; font-size: 12px; line-height: 1.6;
+        }
+        
+        .loading {
+            display: inline-block; width: 12px; height: 12px;
+            border: 2px solid #f3f3f3; border-top: 2px solid #4CAF50;
+            border-radius: 50%; animation: spin 1s linear infinite;
+        }
+        
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        
+        .error { color: #d32f2f; background: #ffebee; padding: 10px; border-radius: 4px; margin-top: 10px; }
+        .success { color: #388e3c; background: #e8f5e9; padding: 10px; border-radius: 4px; margin-top: 10px; }
+    </style>
+</head>
+<body>
+    <div id="map"></div>
+    
+    <div class="header">
+        <h1><i class="fas fa-map-marked-alt"></i> Land Feature Detection</h1>
+        <p>Interactive boundary analysis with feature identification</p>
+        <div id="boundaryStatus" class="success">Boundary loaded</div>
+    </div>
+    
+    <div class="control-panel">
+        <h3><i class="fas fa-layer-group"></i> Features</h3>
+        
+        <div class="feature-toggle">
+            <input type="checkbox" id="toggle_water" checked>
+            <label for="toggle_water"><span style="color:#4A90E2">■</span> Water Bodies & Rivers</label>
+        </div>
+        
+        <div class="feature-toggle">
+            <input type="checkbox" id="toggle_urban" checked>
+            <label for="toggle_urban"><span style="color:#E74C3C">■</span> Urban Areas & Houses</label>
+        </div>
+        
+        <div class="feature-toggle">
+            <input type="checkbox" id="toggle_roads" checked>
+            <label for="toggle_roads"><span style="color:#F39C12">■</span> Roads & Infrastructure</label>
+        </div>
+        
+        <div class="feature-toggle">
+            <input type="checkbox" id="toggle_agricultural" checked>
+            <label for="toggle_agricultural"><span style="color:#27AE60">■</span> Agricultural Land</label>
+        </div>
+        
+        <div class="feature-toggle">
+            <input type="checkbox" id="toggle_vegetation" checked>
+            <label for="toggle_vegetation"><span style="color:#2ECC71">■</span> Trees & Vegetation</label>
+        </div>
+        
+        <div class="feature-toggle">
+            <input type="checkbox" id="toggle_drains" checked>
+            <label for="toggle_drains"><span style="color:#3498DB">■</span> Drains & Waterways</label>
+        </div>
+        
+        <button class="btn" onclick="fetchAllFeatures()">
+            <i class="fas fa-sync-alt"></i> Load Features from OSM
+        </button>
+        
+        <button class="btn btn-danger" onclick="clearAllFeatures()">
+            <i class="fas fa-trash"></i> Clear All Features
+        </button>
+        
+        <div id="stats" class="stats">
+            <strong>Statistics:</strong><br>
+            <span id="statsContent">Click "Load Features" to fetch data...</span>
+        </div>
+    </div>
+    
+    <div class="legend">
+        <h3><i class="fas fa-list"></i> Legend</h3>
+        
+        <div class="legend-item">
+            <div class="legend-color" style="background: #4A90E2;"></div>
+            <span>Water Bodies (Rivers, Ponds)</span>
+        </div>
+        
+        <div class="legend-item">
+            <div class="legend-color" style="background: #E74C3C;"></div>
+            <span>Urban Areas & Buildings</span>
+        </div>
+        
+        <div class="legend-item">
+            <div class="legend-color" style="background: #F39C12;"></div>
+            <span>Roads & Transportation</span>
+        </div>
+        
+        <div class="legend-item">
+            <div class="legend-color" style="background: #27AE60;"></div>
+            <span>Croplands & Farms</span>
+        </div>
+        
+        <div class="legend-item">
+            <div class="legend-color" style="background: #2ECC71;"></div>
+            <span>Trees & Forest</span>
+        </div>
+        
+        <div class="legend-item">
+            <div class="legend-color" style="background: #3498DB;"></div>
+            <span>Drains & Channels</span>
+        </div>
+    </div>
+    
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+    <script>
+        // Initialize map
+        const map = L.map('map').setView([25.5362, 87.5515], 18);
+        
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '© OpenStreetMap contributors',
+            maxZoom: 19
+        }).addTo(map);
+        
+        // Boundary coordinates from KML
+        const boundaryCoordinates = [
+            [25.5378131, 87.5569073],
+            [25.5396718, 87.5506739],
+            [25.5390716, 87.5480238],
+            [25.5360512, 87.5457279],
+            [25.533176, 87.5463072],
+            [25.5332825, 87.5559203],
+            [25.5378131, 87.5569073]
+        ];
+        
+        // Draw boundary
+        const boundaryPolygon = L.polygon(boundaryCoordinates, {
+            color: '#000000',
+            weight: 2.5,
+            opacity: 1,
+            fillColor: 'transparent',
+            dashArray: '5, 5'
+        }).addTo(map);
+        
+        // Feature layer groups
+        const waterLayer = L.featureGroup().addTo(map);
+        const urbanLayer = L.featureGroup().addTo(map);
+        const roadsLayer = L.featureGroup().addTo(map);
+        const agriculturalLayer = L.featureGroup().addTo(map);
+        const vegetationLayer = L.featureGroup().addTo(map);
+        const drainsLayer = L.featureGroup().addTo(map);
+        
+        let featureStats = {
+            water: 0, urban: 0, roads: 0, agricultural: 0, vegetation: 0, drains: 0
+        };
+        
+        // Check if point is in boundary
+        function isInBoundary(lat, lng) {
+            let inside = false;
+            const x = lng, y = lat;
+            
+            for (let i = 0, j = boundaryCoordinates.length - 1; i < boundaryCoordinates.length; j = i++) {
+                const xi = boundaryCoordinates[i][1], yi = boundaryCoordinates[i][0];
+                const xj = boundaryCoordinates[j][1], yj = boundaryCoordinates[j][0];
+                
+                const intersect = ((yi > y) !== (yj > y)) && (x < (xj - xi) * (y - yi) / (yj - yi) + xi);
+                if (intersect) inside = !inside;
+            }
+            return inside;
+        }
+        
+        // Fetch features from Overpass API
+        async function fetchAllFeatures() {
+            const statsDiv = document.getElementById('statsContent');
+            statsDiv.innerHTML = '<span class="loading"></span> Fetching data from OpenStreetMap...';
+            
+            const bbox = `${boundaryCoordinates[4][0]},${boundaryCoordinates[4][1]},${boundaryCoordinates[1][0]},${boundaryCoordinates[0][1]}`;
+            
+            try {
+                // Fetch water features
+                await fetchWaterFeatures(bbox);
+                
+                // Fetch urban features
+                await fetchUrbanFeatures(bbox);
+                
+                // Fetch roads
+                await fetchRoads(bbox);
+                
+                // Fetch agricultural features
+                await fetchAgriculturalFeatures(bbox);
+                
+                // Fetch vegetation
+                await fetchVegetation(bbox);
+                
+                // Fetch drains
+                await fetchDrains(bbox);
+                
+                updateStats();
+            } catch (error) {
+                statsDiv.innerHTML = `<span class="error">Error: ${error.message}</span>`;
+            }
+        }
+        
+        // Fetch water features
+        async function fetchWaterFeatures(bbox) {
+            const query = `[bbox:${bbox}];(way["natural"="water"];way["waterway"="river"];way["waterway"="stream"];way["waterway"="pond"];relation["natural"="water"];relation["waterway"="river"];);out geom;`;
+            const url = `https://overpass-api.de/api/interpreter?data=${encodeURIComponent(query)}`;
+            
+            try {
+                const response = await fetch(url);
+                const data = await response.json();
+                
+                data.elements?.forEach(el => {
+                    if (el.geometry) {
+                        const coords = el.geometry.map(p => [p.lat, p.lng]);
+                        const marker = L.polyline(coords, { color: '#4A90E2', weight: 3, opacity: 0.8 }).addTo(waterLayer);
+                        marker.bindPopup(`<b>Water Body</b><br>Type: ${el.tags?.name || 'Unnamed'}`);
+                        featureStats.water++;
+                    }
+                });
+            } catch (e) {
+                console.log('Water features fetch delayed');
+            }
+        }
+        
+        // Fetch urban/building features
+        async function fetchUrbanFeatures(bbox) {
+            const query = `[bbox:${bbox}];(node["building"];way["building"];relation["building"];node["landuse"="residential"];way["landuse"="residential"];);out geom;`;
+            const url = `https://overpass-api.de/api/interpreter?data=${encodeURIComponent(query)}`;
+            
+            try {
+                const response = await fetch(url);
+                const data = await response.json();
+                
+                data.elements?.forEach(el => {
+                    if (el.geometry) {
+                        const coords = el.geometry.map(p => [p.lat, p.lng]);
+                        if (coords.length > 1) {
+                            L.polyline(coords, { color: '#E74C3C', weight: 2, opacity: 0.7 }).addTo(urbanLayer);
+                        } else if (coords.length === 1) {
+                            L.circleMarker(coords[0], { radius: 4, color: '#E74C3C', fill: true }).addTo(urbanLayer);
+                        }
+                        featureStats.urban++;
+                    }
+                });
+            } catch (e) {
+                console.log('Urban features fetch delayed');
+            }
+        }
+        
+        // Fetch roads
+        async function fetchRoads(bbox) {
+            const query = `[bbox:${bbox}];(way["highway"];);out geom;`;
+            const url = `https://overpass-api.de/api/interpreter?data=${encodeURIComponent(query)}`;
+            
+            try {
+                const response = await fetch(url);
+                const data = await response.json();
+                
+                data.elements?.forEach(el => {
+                    if (el.geometry) {
+                        const coords = el.geometry.map(p => [p.lat, p.lng]);
+                        L.polyline(coords, { color: '#F39C12', weight: 2, opacity: 0.8 }).addTo(roadsLayer);
+                        featureStats.roads++;
+                    }
+                });
+            } catch (e) {
+                console.log('Roads fetch delayed');
+            }
+        }
+        
+        // Fetch agricultural features
+        async function fetchAgriculturalFeatures(bbox) {
+            const query = `[bbox:${bbox}];(way["landuse"="farmland"];way["landuse"="farm"];way["landuse"="orchard"];relation["landuse"="farmland"];);out geom;`;
+            const url = `https://overpass-api.de/api/interpreter?data=${encodeURIComponent(query)}`;
+            
+            try {
+                const response = await fetch(url);
+                const data = await response.json();
+                
+                data.elements?.forEach(el => {
+                    if (el.geometry) {
+                        const coords = el.geometry.map(p => [p.lat, p.lng]);
+                        L.polyline(coords, { color: '#27AE60', weight: 2, opacity: 0.7 }).addTo(agriculturalLayer);
+                        featureStats.agricultural++;
+                    }
+                });
+            } catch (e) {
+                console.log('Agricultural features fetch delayed');
+            }
+        }
+        
+        // Fetch vegetation
+        async function fetchVegetation(bbox) {
+            const query = `[bbox:${bbox}];(node["natural"="tree"];way["natural"="wood"];way["landuse"="forest"];relation["natural"="wood"];);out geom;`;
+            const url = `https://overpass-api.de/api/interpreter?data=${encodeURIComponent(query)}`;
+            
+            try {
+                const response = await fetch(url);
+                const data = await response.json();
+                
+                data.elements?.forEach(el => {
+                    if (el.geometry) {
+                        const coords = el.geometry.map(p => [p.lat, p.lng]);
+                        if (coords.length > 1) {
+                            L.polyline(coords, { color: '#2ECC71', weight: 2, opacity: 0.7 }).addTo(vegetationLayer);
+                        } else {
+                            L.circleMarker(coords[0], { radius: 3, color: '#2ECC71', fill: true }).addTo(vegetationLayer);
+                        }
+                        featureStats.vegetation++;
+                    }
+                });
+            } catch (e) {
+                console.log('Vegetation fetch delayed');
+            }
+        }
+        
+        // Fetch drains
+        async function fetchDrains(bbox) {
+            const query = `[bbox:${bbox}];(way["waterway"="drain"];way["waterway"="ditch"];way["waterway"="canal"];way["waterway"="channel"];);out geom;`;
+            const url = `https://overpass-api.de/api/interpreter?data=${encodeURIComponent(query)}`;
+            
+            try {
+                const response = await fetch(url);
+                const data = await response.json();
+                
+                data.elements?.forEach(el => {
+                    if (el.geometry) {
+                        const coords = el.geometry.map(p => [p.lat, p.lng]);
+                        L.polyline(coords, { color: '#3498DB', weight: 2, opacity: 0.7, dashArray: '3,3' }).addTo(drainsLayer);
+                        featureStats.drains++;
+                    }
+                });
+            } catch (e) {
+                console.log('Drains fetch delayed');
+            }
+        }
+        
+        // Update statistics
+        function updateStats() {
+            const total = Object.values(featureStats).reduce((a, b) => a + b, 0);
+            document.getElementById('statsContent').innerHTML = `
+                <strong>Total Features: ${total}</strong><br>
+                🌊 Water: ${featureStats.water}<br>
+                🏢 Urban: ${featureStats.urban}<br>
+                🛣️ Roads: ${featureStats.roads}<br>
+                🌾 Agricultural: ${featureStats.agricultural}<br>
+                🌳 Vegetation: ${featureStats.vegetation}<br>
+                💧 Drains: ${featureStats.drains}
+            `;
+        }
+        
+        // Clear all features
+        function clearAllFeatures() {
+            waterLayer.clearLayers();
+            urbanLayer.clearLayers();
+            roadsLayer.clearLayers();
+            agriculturalLayer.clearLayers();
+            vegetationLayer.clearLayers();
+            drainsLayer.clearLayers();
+            featureStats = { water: 0, urban: 0, roads: 0, agricultural: 0, vegetation: 0, drains: 0 };
+            document.getElementById('statsContent').innerHTML = 'Click "Load Features" to fetch data...';
+        }
+        
+        // Toggle layers
+        document.getElementById('toggle_water').addEventListener('change', function() {
+            this.checked ? map.addLayer(waterLayer) : map.removeLayer(waterLayer);
+        });
+        
+        document.getElementById('toggle_urban').addEventListener('change', function() {
+            this.checked ? map.addLayer(urbanLayer) : map.removeLayer(urbanLayer);
+        });
+        
+        document.getElementById('toggle_roads').addEventListener('change', function() {
+            this.checked ? map.addLayer(roadsLayer) : map.removeLayer(roadsLayer);
+        });
+        
+        document.getElementById('toggle_agricultural').addEventListener('change', function() {
+            this.checked ? map.addLayer(agriculturalLayer) : map.removeLayer(agriculturalLayer);
+        });
+        
+        document.getElementById('toggle_vegetation').addEventListener('change', function() {
+            this.checked ? map.addLayer(vegetationLayer) : map.removeLayer(vegetationLayer);
+        });
+        
+        document.getElementById('toggle_drains').addEventListener('change', function() {
+            this.checked ? map.addLayer(drainsLayer) : map.removeLayer(drainsLayer);
+        });
+    </script>
+</body>
+</html>
